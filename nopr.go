@@ -197,7 +197,7 @@ type Repo struct {
 
 func (r Repo) Split() (string, string) {
 	parts := strings.Split(r.FullName, "/")
-	if len(parts) != 2 {
+	if len(parts) < 2 {
 		panic("invalid full name: " + r.FullName)
 	}
 	return parts[0], parts[1]
@@ -238,7 +238,18 @@ func repoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullName := r.URL.Path[len("/repo/"):]
-	// TODO: check the user is an admin, otherwise 403
+
+	client := newClient(ctx, u.GitHubToken)
+
+	ghUser, ghRepo := Repo{FullName: fullName}.Split()
+	if repo, _, err := client.Repositories.Get(ghUser, ghRepo); err != nil {
+		ctx.Errorf("error getting repo: %v", err)
+		http.Error(w, "repo not found", http.StatusNotFound)
+		return
+	} else if perm := *repo.Permissions; !perm["admin"] {
+		http.Error(w, "you do not have admin permissions for this repo", http.StatusForbidden)
+		return
+	}
 
 	repo := GetRepo(ctx, fullName)
 	if repo == nil {
