@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	clientID        = "TODO"
-	clientSecret    = "TODO"
+	// TODO: store these more securely (and revoke these when you do!)
+	clientID        = "350be49c3c1988aac719"
+	clientSecret    = "f14c9383c4b8964781ea4acdd881946b1dfed488"
 	redirectURLPath = "/oauthcallback"
 )
 
@@ -30,12 +31,15 @@ func init() {
 	http.HandleFunc("/start", startHandler)
 	http.HandleFunc(redirectURLPath, oauthHandler)
 	http.HandleFunc("/user", userHandler)
+	http.HandleFunc("/repo/", repoHandler)
+	http.HandleFunc("/hook", webhookHandler)
 }
 
 func startHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := appengine.NewContext(r)
 	u := user.Current(ctx)
 	if u == nil {
+		ctx.Infof("not logged in, redirecting...")
 		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
 		http.Redirect(w, r, loginURL, http.StatusSeeOther)
 		return
@@ -45,6 +49,7 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 	if appengine.IsDevAppServer() {
 		host = "http://localhost:8080"
 	}
+	ctx.Infof("starting oauth...")
 	redirectURL := host + redirectURLPath
 	url := fmt.Sprintf("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=%s",
 		clientID, redirectURL, scopes)
@@ -52,15 +57,17 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func oauthHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := appengine.NewContext(r)
 	code := r.FormValue("code")
 	if code == "" {
+		ctx.Errorf("no code, going to start")
 		http.Redirect(w, r, "/start", http.StatusSeeOther)
 		return
 	}
 
-	ctx := appengine.NewContext(r)
 	u := user.Current(ctx)
 	if u == nil {
+		ctx.Infof("not logged in, redirecting...")
 		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
 		http.Redirect(w, r, loginURL, http.StatusSeeOther)
 		return
@@ -139,28 +146,30 @@ func PutUser(ctx appengine.Context, u User) error {
 	return err
 }
 
-func GetUser(ctx appengine.Context, uu *user.User) *User {
-	k := datastore.NewKey(ctx, "User", uu.ID, 0, nil)
-	var u *User
-	if err := datastore.Get(ctx, k, u); err == datastore.ErrNoSuchEntity {
+func GetUser(ctx appengine.Context, id string) *User {
+	k := datastore.NewKey(ctx, "User", id, 0, nil)
+	var u User
+	if err := datastore.Get(ctx, k, &u); err == datastore.ErrNoSuchEntity {
 		return nil
 	} else if err != nil {
 		ctx.Errorf("getting user: %v", err)
 		return nil
 	}
-	return u
+	return &u
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := appengine.NewContext(r)
 	uu := user.Current(ctx)
 	if uu == nil {
+		ctx.Infof("not logged in, redirecting...")
 		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
 		http.Redirect(w, r, loginURL, http.StatusSeeOther)
 		return
 	}
-	u := GetUser(ctx, uu)
+	u := GetUser(ctx, uu.ID)
 	if u == nil {
+		ctx.Infof("unknown user, going to /start")
 		http.Redirect(w, r, "/start", http.StatusSeeOther)
 		return
 	}
@@ -176,39 +185,14 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", "text/html")
 	fmt.Fprintln(w, "<html><body><ul>")
 	for _, r := range repos {
-		fmt.Fprintf(w, `<li><a href="/repo/%s">%s</a></li>\n`, *r.FullName, *r.FullName)
+		fmt.Fprintf(w, `<li><a href="/repo/%s">%s</a></li>`, *r.FullName, *r.FullName)
 	}
 	fmt.Fprintln(w, "</ul></body></html>")
 }
 
-func repoHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := appengine.NewContext(r)
-	uu := user.Current(ctx)
-	if uu == nil {
-		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
-		http.Redirect(w, r, loginURL, http.StatusSeeOther)
-		return
-	}
-	u := GetUser(ctx, uu)
-	if u == nil {
-		http.Redirect(w, r, "/start", http.StatusSeeOther)
-		return
-	}
-
-	fullName := r.URL.Path[len("/repo/"):]
-	fmt.Fprintln(w, fullName)
-
-	parts := strings.Split(fullName, "/")
-	repoUser := parts[0]
-	repoName := parts[1]
-
-	newClient(ctx, u.GitHubToken).Repositories.Get(repoUser, repoName)
-	// TODO: get the repo, check the user is an admin
-	// TODO: display current repo config, allow updates to config (enable/disable, specific message)
-}
-
 type Repo struct {
 	FullName string // e.g., MyUser/foo-bar
+	UserID   string // User key to use to close PRs
 }
 
 func (r Repo) Split() (string, string) {
@@ -227,12 +211,100 @@ func PutRepo(ctx appengine.Context, r Repo) error {
 
 func GetRepo(ctx appengine.Context, fn string) *Repo {
 	k := datastore.NewKey(ctx, "Repo", fn, 0, nil)
-	var r *Repo
-	if err := datastore.Get(ctx, k, r); err == datastore.ErrNoSuchEntity {
+	var r Repo
+	if err := datastore.Get(ctx, k, &r); err == datastore.ErrNoSuchEntity {
 		return nil
 	} else if err != nil {
 		ctx.Errorf("getting repo: %v", err)
 		return nil
 	}
-	return r
+	return &r
+}
+
+func repoHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := appengine.NewContext(r)
+	uu := user.Current(ctx)
+	if uu == nil {
+		ctx.Infof("not logged in, redirecting...")
+		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+	u := GetUser(ctx, uu.ID)
+	if u == nil {
+		ctx.Infof("unknown user, going to /start")
+		http.Redirect(w, r, "/start", http.StatusSeeOther)
+		return
+	}
+
+	fullName := r.URL.Path[len("/repo/"):]
+	// TODO: check the user is an admin, otherwise 403
+
+	repo := GetRepo(ctx, fullName)
+	if repo == nil {
+		// TODO: display button to enable
+		fmt.Fprintln(w, "repo is not enabled for", fullName)
+		return
+	}
+
+	fmt.Fprintf(w, "%v", repo)
+	// TODO: display current repo config, allow updates to config (enable/disable, specific message)
+}
+
+func webhookHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := appengine.NewContext(r)
+	if r.Method != "POST" {
+		return
+	}
+	if r.Header.Get("X-Github-Event") != "pull_request" {
+		return
+	}
+
+	var hook github.PullRequestEvent
+	if err := json.NewDecoder(r.Body).Decode(&hook); err != nil {
+		ctx.Errorf("decoding json: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if *hook.Action != "opened" {
+		return
+	}
+	ctx.Infof("got webhook for pull request opened for %q (%s)", *hook.Repo.FullName, *hook.PullRequest.Head.SHA)
+
+	repo := GetRepo(ctx, *hook.Repo.FullName)
+	if repo == nil {
+		ctx.Errorf("unknown repo")
+		// TODO: delete webhook?
+		return
+	}
+
+	user := GetUser(ctx, repo.UserID)
+	if user == nil {
+		ctx.Errorf("unknown user %q", repo.UserID)
+		// TODO: user who configured the hook has left?
+		return
+	}
+
+	ghUser, ghRepo := repo.Split()
+	client := newClient(ctx, user.GitHubToken)
+
+	if _, _, err := client.Repositories.CreateStatus(ghUser, ghRepo, *hook.PullRequest.Head.SHA, &github.RepoStatus{
+		State:       github.String("error"),
+		TargetURL:   github.String("https://nopullrequests.appspot.com"),
+		Description: github.String("This repository has chosen not to enable pull requests."), // TODO: configurable
+		Context:     github.String("no pull requests"),
+	}); err != nil {
+		ctx.Errorf("failed to create status on %q: %v", *hook.PullRequest.Head.SHA, err)
+		// TODO: retry?
+		return
+	}
+
+	if _, _, err := client.PullRequests.Edit(ghUser, ghRepo, *hook.Number, &github.PullRequest{
+		State: github.String("closed"),
+	}); err != nil {
+		ctx.Errorf("failed to close pull request: %v", err)
+		// TODO: retry?
+		return
+	}
+
 }
