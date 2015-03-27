@@ -1,3 +1,10 @@
+// TODO: prettier UI, use template/html, use some CSS
+// TODO: better error handling, don't just write a 500 with the raw error message, render an error template
+// TODO: allow users to configure behavior:
+// - whether to close the PR or add a status (closing hides statuses)
+// - whether to comment on the PR before closing
+// - custom text to use when closing
+
 package nopr
 
 import (
