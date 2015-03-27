@@ -29,6 +29,7 @@ var scopes = strings.Join([]string{
 }, ",")
 
 func init() {
+	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/start", startHandler)
 	http.HandleFunc(redirectURLPath, oauthHandler)
 	http.HandleFunc("/user", userHandler)
@@ -36,6 +37,17 @@ func init() {
 	http.HandleFunc("/enable/", enableHandler)
 	http.HandleFunc("/disable/", disableHandler)
 	http.HandleFunc("/hook", webhookHandler)
+}
+
+// TODO: make this a static file, make it not ugly
+func homeHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, `<html><body><h1>Pull Request Rejection Bot</h1>
+<p>Some projects on GitHub don't accept GitHub Pull Requests. Maybe they have their own contribution processes. Maybe they hate freedom. Either way, GitHub doesn't provide a way to disable pull requests officially. So I wrote this.</p>
+
+<p>Using this tool you can effectively disable pull requests for your repo on GitHub. When pull requests are disabled, any time a new one is opened it will immediately be closed by the bot.
+
+<p>Sound fun? <a href="/user">Let's get started.</a>
+</body></html>`)
 }
 
 func startHandler(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +198,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("content-type", "text/html")
-	fmt.Fprintln(w, "<html><body><ul>")
+	fmt.Fprintln(w, "<html><body><h1>Select a repo</h1><ul>")
 	for _, r := range repos {
 		fmt.Fprintf(w, `<li><a href="/repo/%s">%s</a></li>`, *r.FullName, *r.FullName)
 	}
