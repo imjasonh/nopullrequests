@@ -24,7 +24,8 @@ const (
 var scopes = strings.Join([]string{
 	"user:email",      // permission to get basic information about the user
 	"repo:status",     // permission to add statuses to commits
-	"write:repo_hook", // permission to add a webhook to repos
+	"public_repo",     // permission to close PRs
+	"admin:repo_hook", // permission to add/delete webhooks
 }, ",")
 
 func init() {
@@ -32,6 +33,8 @@ func init() {
 	http.HandleFunc(redirectURLPath, oauthHandler)
 	http.HandleFunc("/user", userHandler)
 	http.HandleFunc("/repo/", repoHandler)
+	http.HandleFunc("/enable/", enableHandler)
+	http.HandleFunc("/disable/", disableHandler)
 	http.HandleFunc("/hook", webhookHandler)
 }
 
@@ -191,8 +194,9 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type Repo struct {
-	FullName string // e.g., MyUser/foo-bar
-	UserID   string // User key to use to close PRs
+	FullName  string // e.g., MyUser/foo-bar
+	UserID    string // User key to use to close PRs
+	WebhookID int    // Used to delete the hook
 }
 
 func (r Repo) Split() (string, string) {
@@ -219,6 +223,10 @@ func GetRepo(ctx appengine.Context, fn string) *Repo {
 		return nil
 	}
 	return &r
+}
+
+func DeleteRepo(ctx appengine.Context, fn string) error {
+	return datastore.Delete(ctx, datastore.NewKey(ctx, "Repo", fn, 0, nil))
 }
 
 func repoHandler(w http.ResponseWriter, r *http.Request) {
@@ -253,13 +261,117 @@ func repoHandler(w http.ResponseWriter, r *http.Request) {
 
 	repo := GetRepo(ctx, fullName)
 	if repo == nil {
-		// TODO: display button to enable
-		fmt.Fprintln(w, "repo is not enabled for", fullName)
+		// TODO: xsrf
+		fmt.Fprintf(w, `<html><body><h1>Pull requests are not disabled</h1>
+<form action="/enable/%s" method="POST">
+Click to disable pull requests for %s
+<input type="submit" value="Disable pull requests"></input>
+</form></body></html>`, fullName, fullName)
+	} else {
+		// TODO: allow user to set specific message
+		fmt.Fprintf(w, `<html><body><h1>Pull requests are disabled</h1>
+<form action="/disable/%s" method="POST">
+Click to re-enable pull requests for %s
+<input type="submit" value="Re-enable pull requests"></input>
+</form></body></html>`, fullName, fullName)
+	}
+}
+
+func enableHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
 		return
 	}
 
-	fmt.Fprintf(w, "%v", repo)
-	// TODO: display current repo config, allow updates to config (enable/disable, specific message)
+	ctx := appengine.NewContext(r)
+	uu := user.Current(ctx)
+	if uu == nil {
+		ctx.Infof("not logged in, redirecting...")
+		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+	u := GetUser(ctx, uu.ID)
+	if u == nil {
+		ctx.Infof("unknown user, going to /start")
+		http.Redirect(w, r, "/start", http.StatusSeeOther)
+		return
+	}
+	// TODO: xsrf
+
+	// TODO: check that the user is an admin on the repo
+
+	fullName := r.URL.Path[len("/enable/"):]
+
+	ghUser, ghRepo := Repo{FullName: fullName}.Split()
+	hook, _, err := newClient(ctx, u.GitHubToken).Repositories.CreateHook(ghUser, ghRepo, &github.Hook{
+		Name:   github.String("web"),
+		Events: []string{"pull_request"},
+		Config: map[string]interface{}{
+			"content_type": "json",
+			"url":          fmt.Sprintf("https://%s.appspot.com/hook", appengine.AppID(ctx)),
+		},
+	})
+	if err != nil {
+		ctx.Errorf("creating hook: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := PutRepo(ctx, Repo{
+		FullName:  fullName,
+		UserID:    u.GoogleUserID,
+		WebhookID: *hook.ID,
+	}); err != nil {
+		ctx.Errorf("put repo: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/repo/"+fullName, http.StatusSeeOther)
+}
+
+func disableHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		return
+	}
+
+	ctx := appengine.NewContext(r)
+	uu := user.Current(ctx)
+	if uu == nil {
+		ctx.Infof("not logged in, redirecting...")
+		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+	u := GetUser(ctx, uu.ID)
+	if u == nil {
+		ctx.Infof("unknown user, going to /start")
+		http.Redirect(w, r, "/start", http.StatusSeeOther)
+		return
+	}
+	// TODO: xsrf
+
+	// TODO: check that the user is an admin on the repo
+
+	fullName := r.URL.Path[len("/disable/"):]
+
+	repo := GetRepo(ctx, fullName)
+	if repo == nil {
+		http.Error(w, "repo not found", http.StatusNotFound)
+		return
+	}
+
+	ghUser, ghRepo := repo.Split()
+	if _, err := newClient(ctx, u.GitHubToken).Repositories.DeleteHook(ghUser, ghRepo, repo.WebhookID); err != nil {
+		ctx.Errorf("delete hook: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := DeleteRepo(ctx, repo.FullName); err != nil {
+		ctx.Errorf("delete repo: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/repo/"+fullName, http.StatusSeeOther)
 }
 
 func webhookHandler(w http.ResponseWriter, r *http.Request) {
@@ -270,17 +382,17 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Github-Event") != "pull_request" {
 		return
 	}
-
+	defer r.Body.Close()
 	var hook github.PullRequestEvent
 	if err := json.NewDecoder(r.Body).Decode(&hook); err != nil {
 		ctx.Errorf("decoding json: %v", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if *hook.Action != "opened" {
+	if *hook.Action != "opened" && *hook.Action != "reopened" {
 		return
 	}
-	ctx.Infof("got webhook for pull request opened for %q (%s)", *hook.Repo.FullName, *hook.PullRequest.Head.SHA)
+	ctx.Infof("got webhook for pull request %d opened for %q (%s)", *hook.Number, *hook.Repo.FullName, *hook.PullRequest.Head.SHA)
 
 	repo := GetRepo(ctx, *hook.Repo.FullName)
 	if repo == nil {
@@ -306,16 +418,14 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		Context:     github.String("no pull requests"),
 	}); err != nil {
 		ctx.Errorf("failed to create status on %q: %v", *hook.PullRequest.Head.SHA, err)
-		// TODO: retry?
 		return
 	}
 
+	// TODO: this seems to hide the commit status, maybe this should post a comment instead?
 	if _, _, err := client.PullRequests.Edit(ghUser, ghRepo, *hook.Number, &github.PullRequest{
 		State: github.String("closed"),
 	}); err != nil {
 		ctx.Errorf("failed to close pull request: %v", err)
-		// TODO: retry?
 		return
 	}
-
 }
