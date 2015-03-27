@@ -30,9 +30,10 @@ const (
 
 var scopes = strings.Join([]string{
 	"user:email",      // permission to get basic information about the user
-	"repo:status",     // permission to add statuses to commits
 	"public_repo",     // permission to close PRs
 	"admin:repo_hook", // permission to add/delete webhooks
+	// TODO: ask for this when we're not just closing the PR
+	// "repo:status",     // permission to add statuses to commits
 }, ",")
 
 func init() {
@@ -426,14 +427,25 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	ghUser, ghRepo := repo.Split()
 	client := newClient(ctx, user.GitHubToken)
 
-	if _, _, err := client.Repositories.CreateStatus(ghUser, ghRepo, *hook.PullRequest.Head.SHA, &github.RepoStatus{
-		State:       github.String("error"),
-		TargetURL:   github.String("https://nopullrequests.appspot.com"),
-		Description: github.String("This repository has chosen not to enable pull requests."), // TODO: configurable
-		Context:     github.String("no pull requests"),
+	// TODO: Commit statuses are hidden when the PR is closed, and stick around
+	// once they're reopened. Either the PR should stay open with a failed status,
+	// and the status should be removed when PRs are re-enabled (ugh), or we can
+	// just skip the status and comment and close.
+	/*
+		if _, _, err := client.Repositories.CreateStatus(ghUser, ghRepo, *hook.PullRequest.Head.SHA, &github.RepoStatus{
+			State:       github.String("error"),
+			TargetURL:   github.String("https://nopullrequests.appspot.com"),
+			Description: github.String("This repository has chosen not to enable pull requests."), // TODO: configurable
+			Context:     github.String("no pull requests"),
+		}); err != nil {
+			ctx.Errorf("failed to create status on %q: %v", *hook.PullRequest.Head.SHA, err)
+		}
+	*/
+
+	if _, _, err := client.Issues.CreateComment(ghUser, ghRepo, *hook.Number, &github.IssueComment{
+		Body: github.String("This repository has chosen to disable pull requests."), // TODO: configurable
 	}); err != nil {
-		ctx.Errorf("failed to create status on %q: %v", *hook.PullRequest.Head.SHA, err)
-		return
+		ctx.Errorf("failed to create comment: %v", err)
 	}
 
 	// TODO: this seems to hide the commit status, maybe this should post a comment instead?
@@ -441,6 +453,5 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		State: github.String("closed"),
 	}); err != nil {
 		ctx.Errorf("failed to close pull request: %v", err)
-		return
 	}
 }
