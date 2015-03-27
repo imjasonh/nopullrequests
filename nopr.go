@@ -60,12 +60,8 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host := fmt.Sprintf("https://%s.appspot.com", appengine.AppID(ctx))
-	if appengine.IsDevAppServer() {
-		host = "http://localhost:8080"
-	}
 	ctx.Infof("starting oauth...")
-	redirectURL := host + redirectURLPath
+	redirectURL := fmt.Sprintf("https://%s.appspot.com", appengine.AppID(ctx)) + redirectURLPath
 	url := fmt.Sprintf("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=%s",
 		clientID, redirectURL, scopes)
 	http.Redirect(w, r, url, http.StatusSeeOther)
