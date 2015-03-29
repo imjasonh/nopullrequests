@@ -32,7 +32,6 @@ var userTmpl = template.Must(template.New("user").Parse(`<html><head>
 </div><small>This project is not affiliated with GitHub.com.</small>
 </body></html>`))
 
-// TODO: xsrf
 var repoTmpl = template.Must(template.New("repo").Parse(`<html><head>
 <title>No Pull Requests - {{.GHUser}}/{{.GHRepo}}</title>
 <link rel="stylesheet" href="/static/style.css" />

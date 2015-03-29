@@ -1,9 +1,13 @@
-// TODO: prettier UI, use template/html, use some CSS
 // TODO: better error handling, don't just write a 500 with the raw error message, render an error template
 // TODO: allow users to configure behavior:
 // - whether to close the PR or add a status (closing hides statuses)
 // - whether to comment on the PR before closing
 // - custom text to use when closing
+// TODO: add link to revoke token and remove hooks
+// TODO: remove repo-specific page and add buttons directly to repo list
+// TODO: use appengine-value to store client secret
+// TODO: use gorilla sessions instead of Google auth
+// TODO: xsrf
 
 package nopr
 
@@ -296,7 +300,6 @@ func disableHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/start", http.StatusSeeOther)
 		return
 	}
-	// TODO: xsrf
 	// TODO: check that the user is an admin on the repo
 
 	fullName := r.URL.Path[len("/disable/"):]
@@ -347,7 +350,6 @@ func enableHandler(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/start", http.StatusSeeOther)
 		return
 	}
-	// TODO: xsrf
 	// TODO: check that the user is an admin on the repo
 
 	fullName := r.URL.Path[len("/enable/"):]
