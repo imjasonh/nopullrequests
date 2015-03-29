@@ -49,13 +49,7 @@ func init() {
 
 // TODO: make this a static file, make it not ugly
 func homeHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, `<html><body><h1>Pull Request Rejection Bot</h1>
-<p>Some projects on GitHub don't accept GitHub Pull Requests. Maybe they have their own contribution processes. Maybe they hate freedom. Either way, GitHub doesn't provide a way to disable pull requests officially. So I wrote this.</p>
-
-<p>Using this tool you can effectively disable pull requests for your repo on GitHub. When pull requests are disabled, any time a new one is opened it will immediately be closed by the bot.
-
-<p>Sound fun? <a href="/user">Let's get started.</a>
-</body></html>`)
+	fmt.Fprintln(w, homeTmpl)
 }
 
 func startHandler(w http.ResponseWriter, r *http.Request) {
@@ -201,12 +195,9 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("content-type", "text/html")
-	fmt.Fprintln(w, "<html><body><h1>Select a repo</h1><ul>")
-	for _, r := range repos {
-		fmt.Fprintf(w, `<li><a href="/repo/%s">%s</a></li>`, *r.FullName, *r.FullName)
+	if err := userTmpl.Execute(w, repos); err != nil {
+		ctx.Errorf("executing template: %v", err)
 	}
-	fmt.Fprintln(w, "</ul></body></html>")
 }
 
 type Repo struct {
@@ -276,24 +267,16 @@ func repoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repo := GetRepo(ctx, fullName)
-	if repo == nil {
-		// TODO: xsrf
-		fmt.Fprintf(w, `<html><body><h1>Pull requests are not disabled</h1>
-<form action="/enable/%s" method="POST">
-Click to disable pull requests for %s
-<input type="submit" value="Disable pull requests"></input>
-</form></body></html>`, fullName, fullName)
-	} else {
-		// TODO: allow user to set specific message
-		fmt.Fprintf(w, `<html><body><h1>Pull requests are disabled</h1>
-<form action="/disable/%s" method="POST">
-Click to re-enable pull requests for %s
-<input type="submit" value="Re-enable pull requests"></input>
-</form></body></html>`, fullName, fullName)
+	disabled := repo != nil
+	if err := repoTmpl.Execute(w, map[string]interface{}{
+		"Disabled": disabled,
+		"FullName": fullName,
+	}); err != nil {
+		ctx.Errorf("executing template: %v", err)
 	}
 }
 
-func enableHandler(w http.ResponseWriter, r *http.Request) {
+func disableHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		return
 	}
@@ -313,10 +296,9 @@ func enableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// TODO: xsrf
-
 	// TODO: check that the user is an admin on the repo
 
-	fullName := r.URL.Path[len("/enable/"):]
+	fullName := r.URL.Path[len("/disable/"):]
 
 	ghUser, ghRepo := Repo{FullName: fullName}.Split()
 	hook, _, err := newClient(ctx, u.GitHubToken).Repositories.CreateHook(ghUser, ghRepo, &github.Hook{
@@ -345,7 +327,7 @@ func enableHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/repo/"+fullName, http.StatusSeeOther)
 }
 
-func disableHandler(w http.ResponseWriter, r *http.Request) {
+func enableHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		return
 	}
@@ -365,10 +347,9 @@ func disableHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// TODO: xsrf
-
 	// TODO: check that the user is an admin on the repo
 
-	fullName := r.URL.Path[len("/disable/"):]
+	fullName := r.URL.Path[len("/enable/"):]
 
 	repo := GetRepo(ctx, fullName)
 	if repo == nil {
