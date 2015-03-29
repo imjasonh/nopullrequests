@@ -1,0 +1,62 @@
+body {
+  font: 13px/1.4 Helvetica, arial, nimbussansl, liberationsans, freesans, clean, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  text-align: center;
+}
+a {
+  color: #4183c4;
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+p, ul {
+  color: #333;
+  font-size: 16px;
+}
+ul {
+  width: 300px;
+  margin-right: auto;
+  margin-left: auto;
+  text-align: left;
+}
+div#container {
+  width: 800px;
+  margin-right: auto;
+  margin-left: auto;
+  margin-top: 40px;
+  background-color: #fafafa;
+  border: 1px solid #e5e5e5;
+  box-shadow: inset 0 0 10px rgba(0,0,0,0.05);
+  border-radius: 3px;
+  padding: 60px 60px 120px;
+}
+button {
+  color: #fff;
+  position: relative;
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 20px;
+  white-space: nowrap;
+  vertical-align: middle;
+  cursor: pointer;
+  background-repeat: repeat-x;
+  border: 1px solid;
+  border-radius: 3px;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-appearance: none;
+}
+button#enable {
+  background-color: #60b044;
+  background-image: linear-gradient(#8add6d, #60b044);
+  border-color: #5ca941;
+}
+button#disable {
+  background-color:#b33630;
+  background-image:-webkit-linear-gradient(#dc5f59, #b33630);
+  border-color: #cd504a;
+}

@@ -270,7 +270,8 @@ func repoHandler(w http.ResponseWriter, r *http.Request) {
 	disabled := repo != nil
 	if err := repoTmpl.Execute(w, map[string]interface{}{
 		"Disabled": disabled,
-		"FullName": fullName,
+		"GHUser":   ghUser,
+		"GHRepo":   ghRepo,
 	}); err != nil {
 		ctx.Errorf("executing template: %v", err)
 	}
