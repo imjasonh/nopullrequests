@@ -31,3 +31,14 @@ GitHub Pull Request Rejection Bot</h1>
 <h3><a href="/">&laquo; Home</a></h3>
 </div><small>This project is not affiliated with GitHub.com.</small>
 </body></html>`))
+
+var errorTmpl = template.Must(template.New("error").Parse(`<html><head>
+<title>Oh noes!!1!</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head><body><div id="container">
+<h1>Oh noes!!1!</h1>
+<h3>Something went wrong.</h3>
+<p>{{.}}</p>
+<h3><a href="/">&laquo; Home</a></h3>
+</div><small>This project is not affiliated with GitHub.com.</small>
+</body></html>`))

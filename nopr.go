@@ -1,4 +1,3 @@
-// TODO: better error handling, don't just write a 500 with the raw error message, render an error template
 // TODO: allow users to configure behavior:
 // - whether to close the PR or add a status (closing hides statuses)
 // - whether to comment on the PR before closing
@@ -6,7 +5,7 @@
 // TODO: add link to revoke token and remove hooks
 // TODO: use appengine-value to store client secret
 // TODO: use gorilla sessions instead of Google auth
-// TODO: xsrf
+// TODO: xsrf everywhere
 
 package nopr
 
@@ -65,6 +64,11 @@ func startHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, url, http.StatusSeeOther)
 }
 
+func renderError(w http.ResponseWriter, msg string) {
+	w.WriteHeader(http.StatusInternalServerError)
+	errorTmpl.Execute(w, msg)
+}
+
 func oauthHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := appengine.NewContext(r)
 	code := r.FormValue("code")
@@ -84,14 +88,15 @@ func oauthHandler(w http.ResponseWriter, r *http.Request) {
 
 	tok, err := getAccessToken(ctx, code)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		ctx.Errorf("getting access token: %v", err)
+		renderError(w, "Error getting access token")
 		return
 	}
 
 	ghu, _, err := newClient(ctx, tok).Users.Get("")
 	if err != nil {
 		ctx.Errorf("getting user: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error getting user")
 		return
 	}
 
@@ -101,7 +106,7 @@ func oauthHandler(w http.ResponseWriter, r *http.Request) {
 		GitHubToken:  tok,
 	}); err != nil {
 		ctx.Errorf("put user: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error writing user entry")
 		return
 	}
 	http.Redirect(w, r, "/user", http.StatusSeeOther)
@@ -188,7 +193,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		ctx.Errorf("listing repos: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error listing repos")
 		return
 	}
 
@@ -211,7 +216,8 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			ctx.Errorf("getmulti: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			renderError(w, "Error retrieving repos")
+			return
 		}
 	} else {
 		// all repos are disabled
@@ -295,7 +301,7 @@ func disableHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		ctx.Errorf("creating hook: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error creating webhook")
 		return
 	}
 
@@ -305,7 +311,7 @@ func disableHandler(w http.ResponseWriter, r *http.Request) {
 		WebhookID: *hook.ID,
 	}); err != nil {
 		ctx.Errorf("put repo: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error writing repo entry")
 		return
 	}
 	http.Redirect(w, r, "/user", http.StatusSeeOther)
@@ -343,12 +349,12 @@ func enableHandler(w http.ResponseWriter, r *http.Request) {
 	ghUser, ghRepo := repo.Split()
 	if _, err := newClient(ctx, u.GitHubToken).Repositories.DeleteHook(ghUser, ghRepo, repo.WebhookID); err != nil {
 		ctx.Errorf("delete hook: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error deleting webhook")
 		return
 	}
 	if err := DeleteRepo(ctx, repo.FullName); err != nil {
 		ctx.Errorf("delete repo: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		renderError(w, "Error deleting repo entry")
 		return
 	}
 	http.Redirect(w, r, "/user", http.StatusSeeOther)
