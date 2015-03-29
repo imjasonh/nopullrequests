@@ -4,7 +4,6 @@
 // - whether to comment on the PR before closing
 // - custom text to use when closing
 // TODO: add link to revoke token and remove hooks
-// TODO: remove repo-specific page and add buttons directly to repo list
 // TODO: use appengine-value to store client secret
 // TODO: use gorilla sessions instead of Google auth
 // TODO: xsrf
@@ -45,7 +44,6 @@ func init() {
 	http.HandleFunc("/start", startHandler)
 	http.HandleFunc(redirectURLPath, oauthHandler)
 	http.HandleFunc("/user", userHandler)
-	http.HandleFunc("/repo/", repoHandler)
 	http.HandleFunc("/enable/", enableHandler)
 	http.HandleFunc("/disable/", disableHandler)
 	http.HandleFunc("/hook", webhookHandler)
@@ -199,7 +197,36 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := userTmpl.Execute(w, repos); err != nil {
+
+	type data struct {
+		Repo     github.Repository
+		Disabled bool
+	}
+	d := []data{}
+
+	keys := []*datastore.Key{}
+	for _, r := range repos {
+		keys = append(keys, datastore.NewKey(ctx, "Repo", *r.FullName, 0, nil))
+	}
+	repoEntities := make([]Repo, len(keys))
+	if err := datastore.GetMulti(ctx, keys, repoEntities); err != nil {
+		if me, ok := err.(appengine.MultiError); ok {
+			for i, e := range me {
+				var disabled = e == nil
+				d = append(d, data{Repo: repos[i], Disabled: disabled})
+			}
+		} else {
+			ctx.Errorf("getmulti: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	} else {
+		// all repos are disabled
+		for _, r := range repos {
+			d = append(d, data{Repo: r, Disabled: true})
+		}
+	}
+
+	if err := userTmpl.Execute(w, d); err != nil {
 		ctx.Errorf("executing template: %v", err)
 	}
 }
@@ -238,47 +265,6 @@ func GetRepo(ctx appengine.Context, fn string) *Repo {
 
 func DeleteRepo(ctx appengine.Context, fn string) error {
 	return datastore.Delete(ctx, datastore.NewKey(ctx, "Repo", fn, 0, nil))
-}
-
-func repoHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := appengine.NewContext(r)
-	uu := user.Current(ctx)
-	if uu == nil {
-		ctx.Infof("not logged in, redirecting...")
-		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
-		http.Redirect(w, r, loginURL, http.StatusSeeOther)
-		return
-	}
-	u := GetUser(ctx, uu.ID)
-	if u == nil {
-		ctx.Infof("unknown user, going to /start")
-		http.Redirect(w, r, "/start", http.StatusSeeOther)
-		return
-	}
-
-	fullName := r.URL.Path[len("/repo/"):]
-
-	client := newClient(ctx, u.GitHubToken)
-
-	ghUser, ghRepo := Repo{FullName: fullName}.Split()
-	if repo, _, err := client.Repositories.Get(ghUser, ghRepo); err != nil {
-		ctx.Errorf("error getting repo: %v", err)
-		http.Error(w, "repo not found", http.StatusNotFound)
-		return
-	} else if perm := *repo.Permissions; !perm["admin"] {
-		http.Error(w, "you do not have admin permissions for this repo", http.StatusForbidden)
-		return
-	}
-
-	repo := GetRepo(ctx, fullName)
-	disabled := repo != nil
-	if err := repoTmpl.Execute(w, map[string]interface{}{
-		"Disabled": disabled,
-		"GHUser":   ghUser,
-		"GHRepo":   ghRepo,
-	}); err != nil {
-		ctx.Errorf("executing template: %v", err)
-	}
 }
 
 func disableHandler(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +314,7 @@ func disableHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/repo/"+fullName, http.StatusSeeOther)
+	http.Redirect(w, r, "/user", http.StatusSeeOther)
 }
 
 func enableHandler(w http.ResponseWriter, r *http.Request) {
@@ -371,7 +357,7 @@ func enableHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/repo/"+fullName, http.StatusSeeOther)
+	http.Redirect(w, r, "/user", http.StatusSeeOther)
 }
 
 func webhookHandler(w http.ResponseWriter, r *http.Request) {
