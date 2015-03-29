@@ -40,18 +40,12 @@ var scopes = strings.Join([]string{
 }, ",")
 
 func init() {
-	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/start", startHandler)
 	http.HandleFunc(redirectURLPath, oauthHandler)
 	http.HandleFunc("/user", userHandler)
 	http.HandleFunc("/enable/", enableHandler)
 	http.HandleFunc("/disable/", disableHandler)
 	http.HandleFunc("/hook", webhookHandler)
-}
-
-// TODO: make this a static file, make it not ugly
-func homeHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, homeTmpl)
 }
 
 func startHandler(w http.ResponseWriter, r *http.Request) {
