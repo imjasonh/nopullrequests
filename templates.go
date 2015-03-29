@@ -3,7 +3,7 @@ package nopr
 import "text/template"
 
 const homeTmpl = `<html><head>
-<title>No Pull Requests - {{.GHUser}}/{{.GHRepo}}</title>
+<title>No Pull Requests</title>
 <link rel="stylesheet" href="/static/style.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/octicons/2.2.0/octicons.css" />
 </head><body><div id="container">
