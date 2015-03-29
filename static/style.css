@@ -24,10 +24,9 @@ ul {
   padding: 0;
 }
 li {
-  font-weight: bold;
   height: 32px;
   border-bottom: 1px solid #d8d8d8;
-  padding: 6px 64px 6px 30px;
+  padding-left: 20px;
   position: relative;
   padding-top: 12px;
 }
@@ -45,6 +44,7 @@ div#container {
 button {
   position: absolute;
   right: 20px;
+  top: 10px;
   color: #fff;
   display: inline-block;
   padding: 2px 10px;

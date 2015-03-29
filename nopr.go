@@ -418,7 +418,6 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 		ctx.Errorf("failed to create comment: %v", err)
 	}
 
-	// TODO: this seems to hide the commit status, maybe this should post a comment instead?
 	if _, _, err := client.PullRequests.Edit(ghUser, ghRepo, *hook.Number, &github.PullRequest{
 		State: github.String("closed"),
 	}); err != nil {
