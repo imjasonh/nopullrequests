@@ -2,7 +2,6 @@
 // - whether to close the PR or add a status (closing hides statuses)
 // - whether to comment on the PR before closing
 // - custom text to use when closing
-// TODO: add link to revoke token and remove hooks
 // TODO: use appengine-value to store client secret
 // TODO: use gorilla sessions instead of Google auth
 // TODO: xsrf everywhere
@@ -44,6 +43,7 @@ func init() {
 	http.HandleFunc("/user", userHandler)
 	http.HandleFunc("/enable/", enableHandler)
 	http.HandleFunc("/disable/", disableHandler)
+	http.HandleFunc("/revoke", revokeHandler)
 	http.HandleFunc("/hook", webhookHandler)
 }
 
@@ -170,6 +170,10 @@ func GetUser(ctx appengine.Context, id string) *User {
 		return nil
 	}
 	return &u
+}
+
+func DeleteUser(ctx appengine.Context, userID string) error {
+	return datastore.Delete(ctx, datastore.NewKey(ctx, "User", userID, 0, nil))
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request) {
@@ -423,4 +427,68 @@ func webhookHandler(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		ctx.Errorf("failed to close pull request: %v", err)
 	}
+}
+
+func revokeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		return
+	}
+
+	ctx := appengine.NewContext(r)
+	uu := user.Current(ctx)
+	if uu == nil {
+		ctx.Infof("not logged in, redirecting...")
+		loginURL, _ := user.LoginURL(ctx, r.URL.Path)
+		http.Redirect(w, r, loginURL, http.StatusSeeOther)
+		return
+	}
+	u := GetUser(ctx, uu.ID)
+	if u == nil {
+		ctx.Infof("unknown user, going to /start")
+		http.Redirect(w, r, "/start", http.StatusSeeOther)
+		return
+	}
+
+	client := newClient(ctx, u.GitHubToken)
+
+	q := datastore.NewQuery("Repo").Filter("UserID =", uu.ID)
+	for t := q.Run(ctx); ; {
+		var r Repo
+		if _, err := t.Next(&r); err == datastore.Done {
+			break
+		} else if err != nil {
+			ctx.Errorf("query: %v", err)
+			renderError(w, "Error listing repos")
+			return
+		}
+		ghUser, ghRepo := r.Split()
+		if _, err := client.Repositories.DeleteHook(ghUser, ghRepo, r.WebhookID); err != nil {
+			ctx.Errorf("delete hook: %v", err)
+			renderError(w, "Error deleting hook")
+			return
+		}
+		if err := DeleteRepo(ctx, r.FullName); err != nil {
+			ctx.Errorf("delete repo: %v", err)
+			renderError(w, "Error deleting repo entry")
+			return
+		}
+	}
+
+	url := fmt.Sprintf("https://api.github.com/applications/%s/tokens/%s", clientID, u.GitHubToken)
+	ctx.Debugf(url)
+	req, _ := http.NewRequest("DELETE", url, nil)
+	req.SetBasicAuth(clientID, clientSecret)
+	if resp, err := urlfetch.Client(ctx).Do(req); err != nil || resp.StatusCode != http.StatusNoContent {
+		ctx.Errorf("revoking token (%d): %v", resp.StatusCode, err)
+		renderError(w, "Error revoking access")
+		return
+	}
+
+	if err := DeleteUser(ctx, uu.ID); err != nil {
+		ctx.Errorf("delete user: %v", err)
+		renderError(w, "Error deleting user entry")
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

@@ -1,6 +1,6 @@
 package nopr
 
-import "text/template"
+import "html/template"
 
 var userTmpl = template.Must(template.New("user").Parse(`<html><head>
 <title>No Pull Requests</title>
@@ -30,6 +30,11 @@ GitHub Pull Request Rejection Bot</h1>
 </form></ul>
 <h3><a href="/">&laquo; Home</a></h3>
 </div><small>This project is not affiliated with GitHub.com.</small>
+
+
+<form id="revoke" action="/revoke" method="POST">
+<a href="javascript:{}" onclick="document.getElementById('revoke').submit();">Revoke access</a>
+</form>
 </body></html>`))
 
 var errorTmpl = template.Must(template.New("error").Parse(`<html><head>
